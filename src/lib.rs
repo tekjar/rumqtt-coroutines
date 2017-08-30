@@ -11,13 +11,13 @@ extern crate log;
 mod codec;
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::io;
+use std::io::{self, ErrorKind};
 
 use codec::MqttCodec;
 
 use futures::prelude::*;
 use futures::stream::{Stream, SplitStream};
-use futures::sync::mpsc::{self, Receiver, Sender};
+use futures::sync::mpsc::{Receiver};
 use tokio_core::reactor::Core;
 use tokio_core::net::TcpStream;
 use tokio_io::AsyncRead;
@@ -51,12 +51,15 @@ pub fn start(commands: Receiver<i32> ) {
         //     Ok(())
         // }));
 
-        // async_block! {
-        //     for command in commands {
-        //         println!("command = {:?}", command);
-        //     }
-        //     Ok(())
-        // }
+
+        let commands = commands.or_else(|_| {
+            Err(io::Error::new(ErrorKind::Other, "Rx Error"))
+        });
+
+        #[async]
+        for command in commands {
+            println!("command = {:?}", command);
+        }
 
         Ok::<(), io::Error>(())
     };
@@ -75,11 +78,11 @@ fn mqtt_recv(receiver: SplitStream<Framed<TcpStream, MqttCodec>>) -> io::Result<
 }
 
 // #[async]
-// fn command_read(commands: Receiver<i32>) -> io::Result<()> {
+// fn command_read(commands: Receiver<i32>) -> Result<i32, ()> {
 //     #[async]
 //     for command in commands {
 //         println!("command = {:?}", command);
 //     }
 
-//     Ok(())
+//     Ok(100)
 // }

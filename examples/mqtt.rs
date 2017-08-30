@@ -1,14 +1,16 @@
 extern crate rumqtt_coroutines;
+extern crate futures_await as futures;
 
 use std::thread;
-use std::mpsc;
+use futures::sync::mpsc;
+use futures::{Future, Sink};
 
 fn main() {
-    let (command_tx, command_rx) = mpsc::channel(1000);
+    let (mut command_tx, command_rx) = mpsc::channel(1000);
     
     thread::spawn(move || {
         for i in 0..100 {
-            command_tx.send(i).wait()
+            command_tx = command_tx.send(i).wait().unwrap();
         }
     });
 
