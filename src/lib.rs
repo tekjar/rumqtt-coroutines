@@ -9,9 +9,10 @@ extern crate bytes;
 extern crate log;
 
 mod codec;
+mod packet;
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::io::{self, ErrorKind};
+use std::io::{self, Cursor, ErrorKind};
 
 use codec::MqttCodec;
 
@@ -22,8 +23,15 @@ use tokio_core::reactor::Core;
 use tokio_core::net::TcpStream;
 use tokio_io::AsyncRead;
 use tokio_io::codec::Framed;
+use mqtt3::*;
 
-pub fn start(commands: Receiver<i32> ) {
+#[derive(Debug)]
+pub enum NetworkRequest {
+    Subscribe(Vec<(TopicPath, QoS)>),
+    Publish(Publish),
+}
+
+pub fn start(commands: Receiver<NetworkRequest> ) {
     let mut reactor = Core::new().unwrap();
     let handle = reactor.handle();
 
@@ -31,9 +39,12 @@ pub fn start(commands: Receiver<i32> ) {
 
     let client = async_block! {
         let stream = await!(TcpStream::connect(&address, &handle)).unwrap();
-        let framed = stream.framed(MqttCodec);
+        let connect = packet::gen_connect_packet("rumqtt-coro", 10, true, None, None);
 
-        let (sender, receiver) = framed.split();
+        let framed = stream.framed(MqttCodec);
+        let framed = await!(framed.send(connect)).unwrap();
+
+        let (mut sender, receiver) = framed.split();
 
         handle.spawn(mqtt_recv(receiver).then(|result| {
             match result {
@@ -59,6 +70,15 @@ pub fn start(commands: Receiver<i32> ) {
         #[async]
         for command in commands {
             println!("command = {:?}", command);
+
+            match command {
+                NetworkRequest::Publish(publish) => {
+                    let publish = Packet::Publish(publish);
+                    sender = await!(sender.send(publish))?
+                }
+                _ => unimplemented!()
+            }
+
         }
 
         Ok::<(), io::Error>(())
