@@ -15,6 +15,8 @@ use rumqtt_coroutines::NetworkRequest;
 fn main() {
     let (mut command_tx, command_rx) = mpsc::channel(1000);
     
+    let mut user_command_tx = command_tx.clone();
+
     thread::spawn(move || {
         for i in 0..100 {
             
@@ -29,10 +31,10 @@ fn main() {
 
             let publish = NetworkRequest::Publish(publish);
 
-            command_tx = command_tx.send(publish).wait().unwrap();
+            user_command_tx = user_command_tx.send(publish).wait().unwrap();
             thread::sleep(Duration::new(3, 0));
         }
     });
 
-    rumqtt_coroutines::start(command_rx);
+    rumqtt_coroutines::start(command_rx, command_tx);
 }

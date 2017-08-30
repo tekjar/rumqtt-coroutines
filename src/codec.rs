@@ -7,12 +7,6 @@ use mqtt3::{self, Packet, MqttWrite, MqttRead};
 
 pub struct MqttCodec;
 
-impl MqttCodec {
-    pub fn new() -> Self {
-        MqttCodec
-    }
-}
-
 impl Decoder for MqttCodec {
     type Item = Packet;
     type Error = io::Error;
