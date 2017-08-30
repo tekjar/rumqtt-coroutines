@@ -1,6 +1,7 @@
 extern crate rumqtt_coroutines;
 extern crate futures_await as futures;
 extern crate mqtt3;
+extern crate multiqueue;
 
 use std::thread;
 use std::time::Duration;
@@ -9,11 +10,12 @@ use std::sync::Arc;
 use futures::sync::mpsc;
 use futures::{Future, Sink};
 use mqtt3::*;
+use multiqueue::mpmc_fut_queue;
 
 use rumqtt_coroutines::NetworkRequest;
 
 fn main() {
-    let (mut command_tx, command_rx) = mpsc::channel(1000);
+    let (mut command_tx, command_rx) = mpmc_fut_queue(1000);
     
     let mut user_command_tx = command_tx.clone();
 
