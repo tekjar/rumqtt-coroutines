@@ -7,6 +7,7 @@ authors = ["tekjar <k.teza1@gmail.com>"]
 futures-await = { git = 'https://github.com/alexcrichton/futures-await' }
 tokio-core = "0.1"
 tokio-io = "0.1"
+tokio-timer = "0.1"
 bytes = "0.4"
 mqtt3 = { git = "https://github.com/tekjar/mqtt3" }
 quick-error = "1.2"

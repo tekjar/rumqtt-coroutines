@@ -3,6 +3,7 @@
 extern crate futures_await as futures;
 extern crate tokio_core;
 extern crate tokio_io;
+extern crate tokio_timer;
 extern crate mqtt3;
 extern crate bytes;
 #[macro_use]
@@ -12,15 +13,18 @@ mod codec;
 mod packet;
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::io::{self, Cursor, ErrorKind};
+use std::io::{self, ErrorKind};
+use std::time::Duration;
 
 use codec::MqttCodec;
 
 use futures::prelude::*;
-use futures::stream::{Stream, SplitStream};
+use futures::stream::{Stream, SplitStream, SplitSink};
 use futures::sync::mpsc::{Receiver};
 use tokio_core::reactor::Core;
 use tokio_core::net::TcpStream;
+use tokio_timer::{Timer, Interval};
+
 use tokio_io::AsyncRead;
 use tokio_io::codec::Framed;
 use mqtt3::*;
@@ -54,31 +58,23 @@ pub fn start(commands: Receiver<NetworkRequest> ) {
             Ok(())
         }));
 
-        // handle.spawn(command_read(commands).then(|result| {
-        //     match result {
-        //         Ok(_) => println!("Command receiver done"),
-        //         Err(e) => println!("Command IO error {:?}", e),
-        //     }
-        //     Ok(())
-        // }));
+        handle.spawn(command_read(commands, sender).then(|result| {
+            match result {
+                Ok(_) => println!("Command receiver done"),
+                Err(e) => println!("Command IO error {:?}", e),
+            }
+            Ok(())
+        }));
 
+        // ping timer
+        let timer = Timer::default();
+        let keep_alive = 10;
 
-        let commands = commands.or_else(|_| {
-            Err(io::Error::new(ErrorKind::Other, "Rx Error"))
-        });
+        let interval = timer.interval(Duration::new(keep_alive, 0));
 
         #[async]
-        for command in commands {
-            println!("command = {:?}", command);
-
-            match command {
-                NetworkRequest::Publish(publish) => {
-                    let publish = Packet::Publish(publish);
-                    sender = await!(sender.send(publish))?
-                }
-                _ => unimplemented!()
-            }
-
+        for t in interval {
+            println!("Ping timer fire");
         }
 
         Ok::<(), io::Error>(())
@@ -97,12 +93,24 @@ fn mqtt_recv(receiver: SplitStream<Framed<TcpStream, MqttCodec>>) -> io::Result<
     Ok(())
 }
 
-// #[async]
-// fn command_read(commands: Receiver<i32>) -> Result<i32, ()> {
-//     #[async]
-//     for command in commands {
-//         println!("command = {:?}", command);
-//     }
+#[async]
+fn command_read(commands: Receiver<NetworkRequest>, mut sender: SplitSink<Framed<TcpStream, MqttCodec>>) -> io::Result<()> {
 
-//     Ok(100)
-// }
+    let commands = commands.or_else(|_| {
+            Err(io::Error::new(ErrorKind::Other, "Rx Error"))
+    });
+    
+    #[async]
+    for command in commands {
+        println!("command = {:?}", command);
+        match command {
+            NetworkRequest::Publish(publish) => {
+                let publish = Packet::Publish(publish);
+                sender = await!(sender.send(publish))?
+            }
+            _ => unimplemented!()
+        }
+    }
+
+    Ok(())
+}
