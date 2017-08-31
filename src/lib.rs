@@ -16,12 +16,14 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::io::{self, ErrorKind};
 use std::error::Error;
 use std::time::Duration;
+use std::thread;
 
 use codec::MqttCodec;
 
 use futures::prelude::*;
 use futures::stream::{Stream, SplitSink};
-use futures::sync::mpsc::{Sender, Receiver};
+use futures::sync::mpsc::{self, Sender, Receiver};
+use std::sync::mpsc as stdmpsc;
 use tokio_core::reactor::Core;
 use tokio_core::net::TcpStream;
 use tokio_timer::Timer;
@@ -37,50 +39,61 @@ pub enum NetworkRequest {
     Ping,
 }
 
-pub fn start(commands_rx: Receiver<NetworkRequest>, commands_tx: Sender<NetworkRequest>) {
-    let mut reactor = Core::new().unwrap();
-    let handle = reactor.handle();
+pub fn start(new_commands_tx: stdmpsc::Sender<Sender<NetworkRequest>>) {
 
-    let address = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 1883);
+    loop {
+        let new_commands_tx = new_commands_tx.clone();
 
-    let client = async_block! {
-        let stream = await!(TcpStream::connect(&address, &handle)).unwrap();
-        let connect = packet::gen_connect_packet("rumqtt-coro", 10, true, None, None);
+        let mut reactor = Core::new().unwrap();
+        let handle = reactor.handle();
 
-        let framed = stream.framed(MqttCodec);
-        let framed = await!(framed.send(connect)).unwrap();
+        let address = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 1883);
+        let (commands_tx, commands_rx) = mpsc::channel::<NetworkRequest>(1000);
+        let ping_commands_tx = commands_tx.clone();
 
-        let (sender, receiver) = framed.split();
+        let client = async_block! {
+            thread::sleep(Duration::new(5, 0));
+            let stream = await!(TcpStream::connect(&address, &handle))?;
+            let connect = packet::gen_connect_packet("rumqtt-coro", 10, true, None, None);
 
-        // ping timer
-        handle.spawn(ping_timer(commands_tx).then(|result| {
-            match result {
-                Ok(_) => println!("Ping timer done"),
-                Err(e) => println!("Ping timer IO error {:?}", e),
+            let framed = stream.framed(MqttCodec);
+            let framed = await!(framed.send(connect)).unwrap();
+
+            new_commands_tx.send(commands_tx).unwrap();
+
+            let (sender, receiver) = framed.split();
+
+            // ping timer
+            handle.spawn(ping_timer(ping_commands_tx).then(|result| {
+                match result {
+                    Ok(_) => println!("Ping timer done"),
+                    Err(e) => println!("Ping timer IO error {:?}", e),
+                }
+                Ok(())
+            }));
+
+            // network transmission requests
+            handle.spawn(command_read(commands_rx, sender).then(|result| {
+                match result {
+                    Ok(_) => println!("Command receiver done"),
+                    Err(e) => println!("Command IO error {:?}", e),
+                }
+                Ok(())
+            }));
+
+            // incoming network messages
+            #[async]
+            for msg in receiver {
+                println!("message = {:?}", msg);
             }
-            Ok(())
-        }));
 
-        // network transmission requests
-        handle.spawn(command_read(commands_rx, sender).then(|result| {
-            match result {
-                Ok(_) => println!("Command receiver done"),
-                Err(e) => println!("Command IO error {:?}", e),
-            }
-            Ok(())
-        }));
+            println!("Done with network receiver !!");
+            Ok::<(), io::Error>(())
+        };
 
-        // incoming network messages
-        #[async]
-        for msg in receiver {
-            println!("message = {:?}", msg);
-        }
-        println!("Done with network receiver !!");
-        Ok::<(), io::Error>(())
-    };
-
-    let _response = reactor.run(client);
-    println!("{:?}", _response);
+        let _response = reactor.run(client);
+        println!("{:?}", _response);
+    }
 }
 
 #[async]
